@@ -177,7 +177,7 @@ impl TextRasterizer {
             length = self.label.dots_printable.1;
         }
 
-        let mut image = DynamicImage::new_luma8(length, width + secondary_width).to_luma();
+        let mut image = DynamicImage::new_luma8(length, width + secondary_width).to_luma8();
         // Set image background
         for (_x, y, pixel) in image.enumerate_pixels_mut() {
             if invert {
@@ -223,7 +223,7 @@ impl TextRasterizer {
         }
 
         if let Some(image_path) = &self.second_row_image {
-            let overlay = image::open(image_path).unwrap().to_luma();
+            let overlay = image::open(image_path).unwrap().to_luma8();
 
             let top_margin = 15;
             let ratio = overlay.width() as f32 / overlay.height() as f32;
@@ -238,7 +238,7 @@ impl TextRasterizer {
                 &overlay,
                 new_width,
                 new_height,
-                image::FilterType::Triangle,
+                image::imageops::FilterType::Triangle,
             );
             image::imageops::overlay(&mut image, &resized, (length - new_width) / 2, width);
         }
