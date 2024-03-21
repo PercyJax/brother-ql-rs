@@ -2,7 +2,10 @@
 name = "brother-ql-rs"
 version = "0.2.1"
 edition = "2018"
-authors = ["Ryan Petschek <petschekr@gmail.com>"]
+authors = [
+    "Ryan Petschek <petschekr@gmail.com>",
+    "Percy Yeung <percy@percyyeung.com>",
+]
 description = "Print to QL-series thermal label printers from Brother"
 readme = "README.md"
 license = "MIT"
@@ -13,6 +16,3 @@ rusttype = "0.8.2"
 image = "0.23"
 rusb = "0.9"
 error-chain = "0.12.1"
-
-#[replace]
-#"libusb-sys:0.2.3"= { git = "https://github.com/cmsd2/libusb-sys/" }

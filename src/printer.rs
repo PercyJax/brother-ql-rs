@@ -2,8 +2,13 @@
 //!
 //! Based on the published [Brother QL Series Command Reference](https://download.brother.com/welcome/docp000678/cv_qlseries_eng_raster_600.pdf)
 
-use std::thread;
+use std::thread::sleep;
 use std::time::Duration;
+use std::{ops::Deref, thread};
+
+use image::buffer::ConvertBuffer;
+use image::{imageops, DynamicImage, GrayImage};
+use image::{imageops::resize, ImageBuffer, Pixel};
 
 pub mod constants;
 
@@ -103,6 +108,15 @@ impl<T: rusb::UsbContext> std::fmt::Debug for ThermalPrinter<T> {
         )
     }
 }
+
+/// Orientation of the label
+///
+/// Normal: label is printed so that you can read text when looking straight on
+/// Rotated: label is printed so that you have to turn your head to read the text being printed
+pub enum Orientation {
+    Normal,
+    Rotated,
+}
 impl<T: rusb::UsbContext> ThermalPrinter<T> {
     /// Create a new `ThermalPrinter` instance using a `rusb` USB device handle.
     ///
@@ -160,6 +174,138 @@ impl<T: rusb::UsbContext> ThermalPrinter<T> {
 
         ThermalPrinter::get_status(&printer)?;
         Ok(printer)
+    }
+
+    /// Resizes, rasterizes, and sends an image to the printer that is the width of the currently loaded label
+    /// and the height of the image when scaled to the original aspect ratio (for Orientation::Normal) and
+    /// rotated 90 degrees (for Orientation::Rotated).
+    ///
+    /// Only supported on endless labels. Untested behavior on die-cut labels
+    pub fn print_image(
+        &self,
+        image: DynamicImage,
+        orientation: Orientation,
+    ) -> Result<status::Response> {
+        let status = self.get_status()?;
+        // let image: GrayImage = image.convert();
+        //     .as_luma8()
+        //     .expect("could not convert image to grayscale")
+        //     .to_owned();
+        let image = match image {
+            DynamicImage::ImageLuma8(i) => i,
+            DynamicImage::ImageLumaA8(i) => i.convert(),
+            DynamicImage::ImageRgb8(i) => i.convert(),
+            DynamicImage::ImageRgba8(i) => i.convert(),
+            DynamicImage::ImageBgr8(i) => i.convert(),
+            DynamicImage::ImageBgra8(i) => i.convert(),
+            DynamicImage::ImageLuma16(i) => i.convert(),
+            DynamicImage::ImageLumaA16(i) => i.convert(),
+            DynamicImage::ImageRgb16(i) => i.convert(),
+            DynamicImage::ImageRgba16(i) => i.convert(),
+        };
+        image.save("./test-output.png").unwrap();
+        let owidth = image.width();
+        let oheight = image.height();
+
+        let current_label = self
+            .current_label()
+            .expect("cannot determine current label size");
+
+        let nwidth = current_label.dots_printable.0;
+        let nheight = match orientation {
+            Orientation::Normal => {
+                (f64::from(nwidth) / (f64::from(owidth)) * f64::from(oheight)).floor() as u32
+            }
+            Orientation::Rotated => {
+                (f64::from(nwidth) / (f64::from(oheight)) * f64::from(owidth)).floor() as u32
+            }
+        };
+        println!("width: {nwidth}, height: {nheight}");
+
+        let image = match orientation {
+            Orientation::Rotated => imageops::rotate90(&image),
+            Orientation::Normal => image,
+        };
+
+        let image = resize(
+            &image,
+            nwidth,
+            nheight,
+            image::imageops::FilterType::Lanczos3,
+        );
+
+        // Rasterize -------
+
+        let width = image.width() as usize;
+        let height = image.height() as usize;
+
+        let mut lines = Vec::with_capacity(width);
+        for row in 0..height {
+            let mut line = [0; 90]; // Always 90 for regular sized printers like the QL-700 (with a 0x00 byte to start)
+                                    // let mut line_byte = 7;
+                                    // Bit index counts backwards
+                                    // First nibble (bits 7 through 4) in the second byte is blank
+                                    // let mut line_bit_index: i8 = 0;
+            for col in (0 as usize)..720 {
+                let line_byte = ((719 / 8) - (col as isize / 8)) as usize;
+                let line_bit_index = col % 8;
+                if col >= width {
+                    break;
+                }
+                let luma_pixel = image.get_pixel(col as u32, row as u32); // + 3 was here in TS code -- not sure if needed
+                let value: u8 = if luma_pixel[0] > 0xFF / 2 { 0 } else { 1 };
+                line[line_byte] |= value << line_bit_index;
+            }
+            lines.push(line);
+        }
+
+        // Print -------
+
+        let mode_command = [0x1B, 0x69, 0x61, 1];
+        self.write(&mode_command)?;
+
+        const VALID_FLAGS: u8 = 0x80 | 0x02 | 0x04 | 0x08 | 0x40; // Everything enabled
+        let media_type: u8 = match status.media.media_type {
+            status::MediaType::ContinuousTape => 0x0A,
+            status::MediaType::DieCutLabels => 0x0B,
+            _ => return Err("No media loaded into printer".into()),
+        };
+
+        let mut media_command = [
+            0x1B,
+            0x69,
+            0x7A,
+            VALID_FLAGS,
+            media_type,
+            status.media.width,
+            status.media.length,
+            0,
+            0,
+            0,
+            0,
+            0x01,
+            0,
+        ];
+        let line_count = (lines.len() as u32).to_le_bytes();
+        media_command[7..7 + 4].copy_from_slice(&line_count);
+        self.write(&media_command)?;
+
+        self.write(&[0x1B, 0x69, 0x4D, 1 << 6])?; // Enable auto-cut
+        self.write(&[0x1B, 0x69, 0x4B, 1 << 3 | 0 << 6])?; // Enable cut-at-end and disable high res printing
+
+        let margins_command = [0x1B, 0x69, 0x64, current_label.feed_margin, 0];
+        self.write(&margins_command)?;
+
+        for line in lines.iter() {
+            let mut raster_command = vec![0x67, 0x00, RASTER_LINE_LENGTH];
+            raster_command.extend_from_slice(line);
+            self.write(&raster_command)?;
+        }
+
+        let print_command = [0x1A];
+        self.write(&print_command)?;
+
+        Ok(status)
     }
 
     /// Sends raster lines to the USB printer, begins printing, and immediately returns
@@ -266,13 +412,31 @@ impl<T: rusb::UsbContext> ThermalPrinter<T> {
 
     fn read(&self) -> Result<status::Response> {
         const RECEIVE_SIZE: usize = 32;
-        let mut response = [0; RECEIVE_SIZE];
-        let bytes_read =
-            self.handle
-                .read_bulk(self.in_endpoint, &mut response, Duration::from_millis(500))?;
+        let mut tries = 3;
 
-        if bytes_read != RECEIVE_SIZE || response[0] != 0x80 {
-            return Err("Invalid response received from printer".into());
+        let mut response = [0; RECEIVE_SIZE];
+
+        for t in (0..3).rev() {
+            let bytes_read =
+                self.handle
+                    .read_bulk(self.in_endpoint, &mut response, Duration::from_secs(3))?;
+
+            if bytes_read != RECEIVE_SIZE {
+                println!(
+                    "bytes_read: {bytes_read} (!= {RECEIVE_SIZE})\nretrying... ({t} tries left)"
+                );
+                sleep(Duration::from_secs(3));
+                continue;
+            }
+            if response[0] != 0x80 {
+                println!("response invalid: {response:?})\nretrying... ({t} tries left)");
+                sleep(Duration::from_secs(3));
+                continue;
+            }
+            if t < 0 {
+                bail!("Invalid response received from printer: {:?}", response);
+            }
+            break;
         }
 
         let model = match response[4] {
@@ -282,6 +446,9 @@ impl<T: rusb::UsbContext> ThermalPrinter<T> {
             0x33 => "QL-580N",
             0x51 => "QL-650TD",
             0x35 => "QL-700",
+            0x38 => "QL-800",
+            0x39 => "QL-810W",
+            0x41 => "QL-820NWB",
             0x50 => "QL-1050",
             0x34 => "QL-1060N",
             _ => "Unknown",
@@ -342,31 +509,31 @@ impl<T: rusb::UsbContext> ThermalPrinter<T> {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use crate::printer::{printers, ThermalPrinter};
-    #[test]
-    fn connect() {
-        let printer_list = printers();
-        assert!(printer_list.len() > 0, "No printers found");
-        let mut printer = ThermalPrinter::new(printer_list.into_iter().next().unwrap()).unwrap();
-        printer.init().unwrap();
-    }
+// #[cfg(test)]
+// mod tests {
+//     use crate::printer::{printers, ThermalPrinter};
+//     #[test]
+//     fn connect() {
+//         let printer_list = printers();
+//         assert!(printer_list.len() > 0, "No printers found");
+//         let mut printer = ThermalPrinter::new(printer_list.into_iter().next().unwrap()).unwrap();
+//         printer.init().unwrap();
+//     }
 
-    use std::path::PathBuf;
-    #[test]
-    #[ignore]
-    fn print() {
-        let printer_list = printers();
-        assert!(printer_list.len() > 0, "No printers found");
-        let mut printer = ThermalPrinter::new(printer_list.into_iter().next().unwrap()).unwrap();
-        let label = printer.init().unwrap().media.to_label();
+//     use std::path::PathBuf;
+//     #[test]
+//     #[ignore]
+//     fn print() {
+//         let printer_list = printers();
+//         assert!(printer_list.len() > 0, "No printers found");
+//         let mut printer = ThermalPrinter::new(printer_list.into_iter().next().unwrap()).unwrap();
+//         let label = printer.init().unwrap().media.to_label();
 
-        let mut rasterizer =
-            crate::text::TextRasterizer::new(label, PathBuf::from("./Space Mono Bold.ttf"));
-        rasterizer.set_second_row_image(PathBuf::from("./logos/BuildGT Mono.png"));
-        let lines = rasterizer.rasterize("Ryan Petschek", Some("Computer Science"), 1.2, false);
+//         let mut rasterizer =
+//             crate::text::TextRasterizer::new(label, PathBuf::from("./Space Mono Bold.ttf"));
+//         rasterizer.set_second_row_image(PathBuf::from("./logos/BuildGT Mono.png"));
+//         let lines = rasterizer.rasterize("Ryan Petschek", Some("Computer Science"), 1.2, false);
 
-        dbg!(printer.print(lines).unwrap());
-    }
-}
+//         dbg!(printer.print(lines).unwrap());
+//     }
+// }

@@ -98,7 +98,7 @@ pub fn image_to_raster_lines(image: &image::GrayImage, width: u32) -> Vec<[u8; 9
     let mut lines = Vec::with_capacity(width);
     for c in 0..width {
         let mut line = [0; 90]; // Always 90 for regular sized printers like the QL-700 (with a 0x00 byte to start)
-        let mut line_byte = 1;
+        let mut line_byte = 0;
         // Bit index counts backwards
         // First nibble (bits 7 through 4) in the second byte is blank
         let mut line_bit_index: i8 = 3;
@@ -108,7 +108,7 @@ pub fn image_to_raster_lines(image: &image::GrayImage, width: u32) -> Vec<[u8; 9
                 line_byte += 1;
                 line_bit_index += 8;
             }
-            image.get_pixel(0, 0);
+            image.get_pixel(0, 0); // TODO: Get rid of this line?
             let luma_pixel = image.get_pixel(c as u32, r as u32); // + 3 was here in TS code -- not sure if needed
             let value: u8 = if luma_pixel[0] > 0xFF / 2 { 0 } else { 1 };
             line[line_byte] |= value << line_bit_index;
