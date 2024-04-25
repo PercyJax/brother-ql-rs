@@ -1,5 +1,7 @@
 //! Label media and USB ID constants used by Brother QL printers
 
+use std::time::Duration;
+
 #[derive(Debug, Copy, Clone)]
 pub struct WidthLength(pub u32, pub u32);
 
@@ -167,3 +169,19 @@ pub fn printer_name_from_id(id: u16) -> Option<&'static str> {
         _ => None,
     }
 }
+
+/// Brother QL printer status message size
+pub const PRINTER_STATUS_SIZE: usize = 32;
+
+pub(crate) struct Timeouts {
+    pub(crate) general: Duration,
+    pub(crate) cooldown: Duration,
+    pub(crate) line_print: Duration,
+}
+
+/// Timeouts
+pub(crate) const TIMEOUTS: Timeouts = Timeouts {
+    general: Duration::from_secs(10),
+    cooldown: Duration::from_secs(1),
+    line_print: Duration::from_millis(500),
+};

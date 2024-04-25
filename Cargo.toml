@@ -12,7 +12,7 @@ license = "MIT"
 repository = "https://github.com/petschekr/brother-ql-rs"
 
 [dependencies]
-rusttype = "0.8.2"
-image = "0.23"
-rusb = "0.9"
-error-chain = "0.12.1"
+rusttype = "0.9.3"
+rusb = "0.9.3"
+image = "0.25.0"
+thiserror = "1.0.58"
