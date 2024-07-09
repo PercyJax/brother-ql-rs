@@ -70,7 +70,7 @@ impl<T: rusb::UsbContext> std::fmt::Debug for ThermalPrinter<T> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 enum State {
     Waiting,
     PrintingStarted,
@@ -286,7 +286,7 @@ impl<T: rusb::UsbContext> ThermalPrinter<T> {
                     }
                     if let Err(_) = self.write_with_timeout(&raster_command, TIMEOUTS.line_print) {
                         // Only acceptable error in sending raster line here is for cooling
-                        self.read_loop(&mut state);
+                        self.read_loop(&mut state, State::PrintingStarted);
                         let State::PrintingStarted = state else {
                             return Err(PrinterError::Printer(format!(
                                 "unexpected state during cooldown: {state:?}"
@@ -306,7 +306,7 @@ impl<T: rusb::UsbContext> ThermalPrinter<T> {
             };
 
             // Verify
-            self.read_loop(&mut state);
+            self.read_loop(&mut state, State::Waiting);
             let State::Waiting = state else {
                 return Err(PrinterError::Printer(format!(
                     "unexpected state during verification: {state:?}"
@@ -325,8 +325,15 @@ impl<T: rusb::UsbContext> ThermalPrinter<T> {
     /// Wait for feedback
     ///
     /// Wait for phase change notifications, cooldown notifications, errors, and ready-to-receive
-    fn read_loop(&self, state: &mut State) {
+    fn read_loop(&self, state: &mut State, expected_state: State) {
+        let mut seen = false;
         loop {
+            if *state == expected_state {
+                if seen {
+                    return;
+                }
+                seen = true;
+            }
             let Ok(status) = self.read() else {
                 *state = State::Errored;
                 return;

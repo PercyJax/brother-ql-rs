@@ -183,5 +183,5 @@ pub(crate) struct Timeouts {
 pub(crate) const TIMEOUTS: Timeouts = Timeouts {
     general: Duration::from_secs(10),
     cooldown: Duration::from_secs(1),
-    line_print: Duration::from_millis(500),
+    line_print: Duration::from_secs(1),
 };

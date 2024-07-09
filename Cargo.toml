@@ -16,3 +16,5 @@ rusttype = "0.9.3"
 rusb = "0.9.3"
 image = "0.25.0"
 thiserror = "1.0.58"
+barcoders = { version = "2.0.0", features = ["image"] }
+qrcodegen = "1.8.0"
