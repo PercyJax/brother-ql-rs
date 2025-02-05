@@ -1,8 +1,8 @@
 use barcoders::{
-    generators::{self, image::Color},
+    generators::{self},
     sym::ean13::EAN13,
 };
-use image::{ImageBuffer, Pixel, Rgba};
+use image::{ImageBuffer, Rgba};
 use qrcodegen::QrCode;
 use thiserror::Error;
 
@@ -19,9 +19,9 @@ pub enum EAN13Data {
 
 pub fn generate_ean13_barcode(
     data: EAN13Data,
-    name: String,
-    description: String,
-    link: Option<String>,
+    _name: String,
+    _description: String,
+    _link: Option<String>,
 ) -> Result<image::ImageBuffer<image::Rgba<u8>, Vec<u8>>, BarcodeError> {
     let mut label = ImageBuffer::new(696, 150);
     label.iter_mut().for_each(|c| *c = u8::MAX);
@@ -100,8 +100,8 @@ pub fn generate_ean13_barcode(
 pub fn generate_barcode_large(
     sku: usize,
     price: f32,
-    name: String,
-    description: String,
+    _name: String,
+    _description: String,
     link: Option<String>,
 ) -> Result<image::ImageBuffer<image::Rgba<u8>, Vec<u8>>, BarcodeError> {
     let mut label = ImageBuffer::new(696, 270);

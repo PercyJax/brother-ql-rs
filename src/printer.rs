@@ -92,7 +92,7 @@ impl<T: rusb::UsbContext> ThermalPrinter<T> {
     ///
     /// Obtain list of connected device handles by calling `printers()`.
     pub fn new(device: rusb::Device<T>) -> Result<Self> {
-        let mut handle = device.open()?;
+        let handle = device.open()?;
         let mut in_endpoint: Option<u8> = None;
         let mut out_endpoint: Option<u8> = None;
 
