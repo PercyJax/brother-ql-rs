@@ -132,8 +132,8 @@ pub fn generate_barcode_large(
     if let Some(link) = link {
         let qr = QrCode::encode_text(&link, qrcodegen::QrCodeEcc::High)
             .map_err(|_| BarcodeError::Overflow("link".into()))?;
-        let size = qr.size().abs() as u32;
-        if size < 21 || size > 177 {
+        let size = qr.size().unsigned_abs();
+        if !(21..=177).contains(&size) {
             return Err(BarcodeError::Overflow("qr".into()));
         }
 

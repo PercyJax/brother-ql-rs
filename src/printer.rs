@@ -275,25 +275,22 @@ impl<T: rusb::UsbContext> ThermalPrinter<T> {
             for line in lines.iter() {
                 let mut raster_command = vec![0x67, 0x00, RASTER_LINE_LENGTH];
                 raster_command.extend_from_slice(line);
-                'line: loop {
-                    match state {
-                        State::Waiting | State::PrintingStarted => (),
-                        e => {
-                            return Err(PrinterError::Printer(format!(
-                                "unexpected status at start of line print: {e:?}"
-                            )))
-                        }
+                match state {
+                    State::Waiting | State::PrintingStarted => (),
+                    e => {
+                        return Err(PrinterError::Printer(format!(
+                            "unexpected status at start of line print: {e:?}"
+                        )))
                     }
-                    if let Err(_) = self.write_with_timeout(&raster_command, TIMEOUTS.line_print) {
-                        // Only acceptable error in sending raster line here is for cooling
-                        self.read_loop(&mut state, State::PrintingStarted);
-                        let State::PrintingStarted = state else {
-                            return Err(PrinterError::Printer(format!(
-                                "unexpected state during cooldown: {state:?}"
-                            )));
-                        };
-                    }
-                    break 'line;
+                }
+                if let Err(e) = self.write_with_timeout(&raster_command, TIMEOUTS.line_print) {
+                    // Only acceptable error in sending raster line here is for cooling
+                    self.read_loop(&mut state, State::PrintingStarted);
+                    let State::PrintingStarted = state else {
+                        return Err(PrinterError::Printer(format!(
+                            "unexpected state during cooldown: {state:?} - encountered error {e}"
+                        )));
+                    };
                 }
             }
 
